@@ -5,9 +5,12 @@ Qt and PyQt have useful internationalization tools. This documents clarify usage
 ## Tools
 
 - QtLinguist
-    - For Windows - https://www.softpedia.com/get/Others/Home-Education/Qt-Linguist.shtml
-- pylupdate5 - included in PyQt5
-- lrelease - included in Qt
+    - included in Qt
+    - Stand-alone app for Windows - https://www.softpedia.com/get/Others/Home-Education/Qt-Linguist.shtml
+- pylupdate5
+    - included in PyQt5
+- lrelease
+    - included in Qt
 
 ## Translation steps
 
