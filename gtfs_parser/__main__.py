@@ -159,8 +159,11 @@ class GTFSParser:
         self.cursor.execute("""
                             SELECT distinct route_id FROM (
                                     trips JOIN (
-                                        stop_times JOIN stops ON stop_times.stop_id = stops.stop_id
-                                    ) ON trips.trip_id = stop_times.trip_id
+                                        (select trip_id, stop_id from stop_times) as t
+                                        JOIN
+                                        (select stop_id from stops) as s
+                                        ON t.stop_id = s.stop_id
+                                    ) ON trips.trip_id = t.trip_id
                             ) as merged WHERE merged.stop_id = "{}"
                             """.format(stop_id))
         return list(map(lambda val: val[0], self.cursor.fetchall()))
