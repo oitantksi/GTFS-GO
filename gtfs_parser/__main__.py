@@ -3,11 +3,16 @@ import os
 import glob
 import zipfile
 import tempfile
+import sqlite3
 from functools import lru_cache
 
 import pandas as pd
 
-from .constants import GTFS_JP_DATATYPES
+try:
+    # QGIS import
+    from .constants import GTFS_JP_DATATYPES
+except:
+    from constants import GTFS_JP_DATATYPES
 
 
 class GTFSParser:
@@ -15,6 +20,9 @@ class GTFSParser:
         txts = glob.glob(os.path.join(
             src_dir, '**', '*.txt'), recursive=True)
         self.dataframes = {}
+        self.connect = sqlite3.connect(':memory:')
+        self.cursor = self.connect.cursor()
+
         for txt in txts:
             datatype = os.path.basename(txt).split('.')[0]
             if os.path.basename(datatype) not in GTFS_JP_DATATYPES:
@@ -30,6 +38,11 @@ class GTFSParser:
             if GTFS_JP_DATATYPES[datatype]['required'] and \
                     datatype not in self.dataframes:
                 raise FileNotFoundError(f'{datatype} is not exists.')
+
+        for df_key in self.dataframes:
+            self.dataframes[df_key].to_sql(df_key, self.connect, if_exists='replace')
+        # self.cursor.execute('select name from sqlite_master where type="table"')
+        # print(self.cursor.fetchall())
 
     def stops_count(self):
         stops_df = self.dataframes['stops']
@@ -143,14 +156,14 @@ class GTFSParser:
             yield feature
 
     def get_route_ids_by(self, stop_id):
-        stop_times_df = self.dataframes['stop_times'][['stop_id', 'trip_id']]
-        trip_id_series = stop_times_df[stop_times_df['stop_id']
-                                       == stop_id]['trip_id']
-        trip_ids = trip_id_series.unique().astype(str).tolist()
-
-        trips_df = self.dataframes['trips'][['trip_id', 'route_id']]
-        filtered = trips_df[trips_df['trip_id'].isin(trip_ids)]
-        return filtered['route_id'].unique().astype(str).tolist()
+        self.cursor.execute("""
+                            SELECT distinct route_id FROM (
+                                    trips JOIN (
+                                        stop_times JOIN stops ON stop_times.stop_id = stops.stop_id
+                                    ) ON trips.trip_id = stop_times.trip_id
+                            ) as merged WHERE merged.stop_id = "{}"
+                            """.format(stop_id))
+        return list(map(lambda val: val[0], self.cursor.fetchall()))
 
     def get_route_name_from(self, route_data):
         if not str(route_data['route_long_name']) == 'nan':
@@ -278,10 +291,10 @@ if __name__ == "__main__":
         os.mkdir(temp_dir)
         with zipfile.ZipFile(args.zip) as z:
             z.extractall(temp_dir)
-        gtfs_jp = GTFS_JP(temp_dir)
+        gtfs_parser = GTFSParser(temp_dir)
         output_dir = temp_dir
     else:
-        gtfs_jp = GTFS_JP(args.src_dir)
+        gtfs_parser = GTFSParser(args.src_dir)
         output_dir = args.src_dir
 
     print('GTFS loaded.')
@@ -289,15 +302,15 @@ if __name__ == "__main__":
     if args.output_dir:
         output_dir = args.output_dir
 
-    routes_features = [route for route in gtfs_jp.read_routes(
+    routes_features = [route for route in gtfs_parser.read_routes(
         no_shapes=args.no_shapes)]
     routes_geojson = {
         'type': 'FeatureCollection',
         'features': routes_features
     }
 
-    stops_features = [stop for stop in gtfs_jp.read_stops(
-        empty_stops=args.empty_stops, diagram_mode=args.diagram_mode)]
+    stops_features = [stop for stop in gtfs_parser.read_stops(
+        ignore_no_route=args.empty_stops, diagram_mode=args.diagram_mode)]
     stops_geojson = {
         'type': 'FeatureCollection',
         'features': stops_features
@@ -310,7 +323,7 @@ if __name__ == "__main__":
         json.dump(stops_geojson, f, ensure_ascii=False)
 
     if args.interpolate:
-        interpolated_stops_features = gtfs_jp.read_interpolated_stops()
+        interpolated_stops_features = gtfs_parser.read_interpolated_stops()
         interpolated_stops_geojson = {
             'type': 'FeatureCollection',
             'features': interpolated_stops_features
